@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>路线文件绘制器</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #172033; }
+    body { display: grid; grid-template-columns: minmax(320px, 390px) 1fr; background: #f4f6f8; }
+    #panel { min-width: 0; height: 100vh; overflow: auto; padding: 16px; background: #fff; border-right: 1px solid #d8dee8; }
+    #map { height: 100vh; min-width: 0; }
+    h1 { margin: 0 0 14px; font-size: 20px; line-height: 1.2; }
+    h2 { margin: 20px 0 10px; font-size: 14px; color: #526071; }
+    label { display: block; margin: 10px 0 6px; font-size: 12px; font-weight: 700; color: #526071; }
+    input, textarea, button { font: inherit; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid #c8d0da;
+      border-radius: 6px;
+      padding: 9px 10px;
+      background: #fff;
+      color: #172033;
+    }
+    textarea { min-height: 150px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; }
+    button {
+      border: 1px solid #c8d0da;
+      border-radius: 6px;
+      padding: 9px 11px;
+      background: #fff;
+      color: #172033;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.primary { border-color: #1769e0; background: #1769e0; color: #fff; }
+    button.danger { border-color: #d43f3a; color: #b3261e; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .row > input { flex: 1 1 auto; min-width: 0; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .hint { margin: 8px 0 0; font-size: 12px; line-height: 1.45; color: #697789; }
+    .stat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+    .stat div { padding: 9px; border: 1px solid #d8dee8; border-radius: 6px; background: #f8fafc; }
+    .stat b { display: block; font-size: 12px; color: #697789; }
+    .stat span { display: block; margin-top: 4px; font-size: 15px; font-weight: 700; }
+    .status { min-height: 20px; margin-top: 10px; font-size: 12px; color: #526071; }
+    .warning { padding: 10px; border-radius: 6px; background: #fff7df; border: 1px solid #ecd186; font-size: 12px; line-height: 1.45; color: #5f4612; }
+    .toggle { display: flex; gap: 8px; align-items: center; margin-top: 8px; font-size: 13px; }
+    .toggle input { width: auto; }
+    @media (max-width: 820px) {
+      body { grid-template-columns: 1fr; grid-template-rows: 48vh auto; }
+      #map { height: 48vh; grid-row: 1; }
+      #panel { height: auto; min-height: 52vh; border-right: 0; border-top: 1px solid #d8dee8; grid-row: 2; }
+    }
+  </style>
+</head>
+<body>
+  <aside id="panel">
+    <h1>路线文件绘制器</h1>
+    <div class="warning">
+      本工具使用百度地图 BD-09 坐标。当前项目的 `run.py` 会把路线文件从 BD-09 转成 iOS 使用的 WGS84，因此不要在这里导出高德/谷歌/WGS84 坐标，否则会出现几百米偏差。
+    </div>
+
+    <h2>地图</h2>
+    <label for="akInput">百度地图浏览器端 AK</label>
+    <div class="row">
+      <input id="akInput" autocomplete="off" placeholder="粘贴百度地图 JavaScript API AK">
+      <button id="loadMapBtn" class="primary">加载</button>
+    </div>
+    <p class="hint">默认填入了一个百度地图浏览器端 AK。也可以改成自己的 AK，加载后会保存在本机浏览器。</p>
+
+    <label for="searchInput">搜索位置</label>
+    <div class="row">
+      <input id="searchInput" placeholder="例如：浙江大学紫金港校区东田径场">
+      <button id="searchBtn">搜索</button>
+    </div>
+
+    <h2>绘制</h2>
+    <div class="grid">
+      <button id="loadSampleBtn">载入 YQ 示例</button>
+      <button id="fitBtn">适应路线</button>
+      <button id="undoBtn">撤销一点</button>
+      <button id="clearBtn" class="danger">清空</button>
+    </div>
+    <label class="toggle">
+      <input id="closeLoopInput" type="checkbox" checked>
+      地图上显示闭合路线
+    </label>
+    <p class="hint">点击地图添加点；拖动蓝色点可微调；滚轮或地图控件可缩放。</p>
+
+    <div class="stat">
+      <div><b>点数</b><span id="pointCount">0</span></div>
+      <div><b>长度</b><span id="routeLength">0 m</span></div>
+      <div><b>坐标系</b><span>BD-09</span></div>
+    </div>
+
+    <h2>路线文本</h2>
+    <label for="routeText">导入 / 导出内容</label>
+    <textarea id="routeText" spellcheck="false" placeholder='{"lng":"120.1304","lat":"30.2698"},{"lng":"120.1305","lat":"30.2700"}'></textarea>
+    <div class="grid" style="margin-top: 8px;">
+      <button id="importBtn">从文本导入</button>
+      <button id="exportBtn" class="primary">导出到文本</button>
+      <button id="copyBtn">复制文本</button>
+      <button id="downloadBtn">下载 txt</button>
+    </div>
+    <p id="status" class="status"></p>
+  </aside>
+  <main id="map"></main>
+
+  <script>
+    const ZJG_CENTER = { lng: 120.0899, lat: 30.3113 };
+    const YQ_CENTER = { lng: 120.1308, lat: 30.2699 };
+    const DEFAULT_BAIDU_AK = "FO1uUNeEPr8JYbkLI7IeZ0awt9NnohBQ";
+    const SAMPLE_YQ_ROUTE = `{"lng":"120.13042659639937","lat":"30.269823237593773"},{"lng":"120.13048049472998","lat":"30.269990889122415"},{"lng":"120.13055685069833","lat":"30.27015464149913"},{"lng":"120.13061524055647","lat":"30.27028720274486"},{"lng":"120.13064218972177","lat":"30.27041196610507"},{"lng":"120.13071854569012","lat":"30.27052113391387"},{"lng":"120.13083083387886","lat":"30.27058351546384"},{"lng":"120.13101049498086","lat":"30.27060300968999"},{"lng":"120.13110032553186","lat":"30.270599110845076"},{"lng":"120.13120363066551","lat":"30.27057181892627"},{"lng":"120.1313024442716","lat":"30.270513336217316"},{"lng":"120.1313743087124","lat":"30.27042756151383"},{"lng":"120.1314012578777","lat":"30.270341786734654"},{"lng":"120.1313922748226","lat":"30.270224821004685"},{"lng":"120.1313832917675","lat":"30.27015464149913"},{"lng":"120.13135185107465","lat":"30.270092259673874"},{"lng":"120.1313204103818","lat":"30.270053271012756"},{"lng":"120.1312934612165","lat":"30.269990889122415"},{"lng":"120.13127998663386","lat":"30.269920709447945"},{"lng":"120.13126202052365","lat":"30.269881720718008"},{"lng":"120.1312215967757","lat":"30.269823237593773"},{"lng":"120.13119015608285","lat":"30.269760855555788"},{"lng":"120.13115422386245","lat":"30.26969457459657"},{"lng":"120.13114074927981","lat":"30.269616596939606"},{"lng":"120.1310778678941","lat":"30.269526922556757"},{"lng":"120.13104193567371","lat":"30.269425551415633"},{"lng":"120.13101947803597","lat":"30.269355371332924"},{"lng":"120.13098803734312","lat":"30.269289090097164"},{"lng":"120.13093863054006","lat":"30.269222808816206"},{"lng":"120.13088473220947","lat":"30.269187718707986"},{"lng":"120.13079490165846","lat":"30.269152628587094"},{"lng":"120.13067812194217","lat":"30.269133134070014"},{"lng":"120.13056134222587","lat":"30.269152628587094"},{"lng":"120.13044905403713","lat":"30.269207213214113"},{"lng":"120.13036371501367","lat":"30.269289090097164"},{"lng":"120.13031879973818","lat":"30.26939825916727"},{"lng":"120.13032329126573","lat":"30.269511327003464"},{"lng":"120.13035922348612","lat":"30.26961269805511"},{"lng":"120.13040863028918","lat":"30.269737462281217"}`;
+
+    const state = {
+      map: null,
+      route: [],
+      markers: [],
+      polyline: null,
+      search: null,
+      apiLoaded: false
+    };
+
+    const els = {
+      akInput: document.getElementById("akInput"),
+      loadMapBtn: document.getElementById("loadMapBtn"),
+      searchInput: document.getElementById("searchInput"),
+      searchBtn: document.getElementById("searchBtn"),
+      loadSampleBtn: document.getElementById("loadSampleBtn"),
+      fitBtn: document.getElementById("fitBtn"),
+      undoBtn: document.getElementById("undoBtn"),
+      clearBtn: document.getElementById("clearBtn"),
+      closeLoopInput: document.getElementById("closeLoopInput"),
+      routeText: document.getElementById("routeText"),
+      importBtn: document.getElementById("importBtn"),
+      exportBtn: document.getElementById("exportBtn"),
+      copyBtn: document.getElementById("copyBtn"),
+      downloadBtn: document.getElementById("downloadBtn"),
+      pointCount: document.getElementById("pointCount"),
+      routeLength: document.getElementById("routeLength"),
+      status: document.getElementById("status")
+    };
+
+    els.akInput.value = localStorage.getItem("baiduMapAk") || DEFAULT_BAIDU_AK;
+    els.routeText.value = SAMPLE_YQ_ROUTE;
+
+    function setStatus(message, isError = false) {
+      els.status.textContent = message;
+      els.status.style.color = isError ? "#b3261e" : "#526071";
+    }
+
+    function requireMap() {
+      if (state.map) return true;
+      setStatus("请先填写 AK 并加载百度地图。", true);
+      return false;
+    }
+
+    function loadBaiduMap() {
+      const ak = els.akInput.value.trim();
+      if (!ak) {
+        setStatus("需要百度地图浏览器端 AK。", true);
+        return;
+      }
+      localStorage.setItem("baiduMapAk", ak);
+      els.loadMapBtn.disabled = true;
+      setStatus("正在加载百度地图...");
+      window.onBMapCallback = () => initMap();
+      const script = document.createElement("script");
+      script.src = `https://api.map.baidu.com/api?type=webgl&v=1.0&ak=${encodeURIComponent(ak)}&callback=onBMapCallback`;
+      script.onerror = () => {
+        els.loadMapBtn.disabled = false;
+        setStatus("百度地图脚本加载失败，请检查网络或 AK。", true);
+      };
+      document.head.appendChild(script);
+    }
+
+    function initMap() {
+      state.apiLoaded = true;
+      state.map = new BMapGL.Map("map");
+      state.map.centerAndZoom(new BMapGL.Point(YQ_CENTER.lng, YQ_CENTER.lat), 18);
+      state.map.enableScrollWheelZoom(true);
+      state.map.addControl(new BMapGL.ZoomControl());
+      state.map.addControl(new BMapGL.ScaleControl());
+      state.map.addEventListener("click", event => {
+        if (event.overlay) return;
+        addPoint({ lng: event.latlng.lng, lat: event.latlng.lat });
+      });
+      state.search = new BMapGL.LocalSearch(state.map, {
+        renderOptions: { map: state.map, autoViewport: true },
+        onSearchComplete: results => {
+          const poi = results && results.getPoi ? results.getPoi(0) : null;
+          if (!poi || !poi.point) {
+            setStatus("没有找到匹配地点。", true);
+            return;
+          }
+          state.map.centerAndZoom(poi.point, 18);
+          setStatus(`已定位到：${poi.title || "搜索结果"}`);
+        }
+      });
+      importFromText(false);
+      setStatus("地图已加载。点击地图即可加点。");
+    }
+
+    function parseRouteText(text) {
+      const normalized = text.trim();
+      if (!normalized) return [];
+      const json = normalized.startsWith("[") ? normalized : `[${normalized}]`;
+      const points = JSON.parse(json).map(item => ({
+        lng: Number(item.lng),
+        lat: Number(item.lat)
+      }));
+      const invalid = points.find(point => !Number.isFinite(point.lng) || !Number.isFinite(point.lat));
+      if (invalid) throw new Error("路线里存在无法识别的经纬度。");
+      return points;
+    }
+
+    function routeToText(points) {
+      return points.map(point => {
+        const lng = Number(point.lng).toFixed(14).replace(/0+$/, "").replace(/\.$/, "");
+        const lat = Number(point.lat).toFixed(14).replace(/0+$/, "").replace(/\.$/, "");
+        return `{"lng":"${lng}","lat":"${lat}"}`;
+      }).join(",");
+    }
+
+    function addPoint(point, skipRefresh = false) {
+      state.route.push({ lng: Number(point.lng), lat: Number(point.lat) });
+      if (!skipRefresh) refreshMap();
+    }
+
+    function replaceRoute(points) {
+      state.route = points.map(point => ({ lng: Number(point.lng), lat: Number(point.lat) }));
+      refreshMap();
+      fitRoute();
+    }
+
+    function refreshMap() {
+      if (!state.map) {
+        refreshStats();
+        return;
+      }
+      state.markers.forEach(marker => state.map.removeOverlay(marker));
+      state.markers = [];
+      if (state.polyline) state.map.removeOverlay(state.polyline);
+      const mapPoints = state.route.map(point => new BMapGL.Point(point.lng, point.lat));
+      mapPoints.forEach((point, index) => {
+        const marker = new BMapGL.Marker(point);
+        marker.enableDragging();
+        marker.setTitle(`第 ${index + 1} 点`);
+        marker.addEventListener("dragend", () => {
+          const position = marker.getPosition();
+          state.route[index] = { lng: position.lng, lat: position.lat };
+          refreshMap();
+        });
+        state.map.addOverlay(marker);
+        state.markers.push(marker);
+      });
+      if (mapPoints.length > 1) {
+        const drawPoints = els.closeLoopInput.checked ? [...mapPoints, mapPoints[0]] : mapPoints;
+        state.polyline = new BMapGL.Polyline(drawPoints, {
+          strokeColor: "#1769e0",
+          strokeWeight: 5,
+          strokeOpacity: 0.88
+        });
+        state.map.addOverlay(state.polyline);
+      }
+      refreshStats();
+    }
+
+    function refreshStats() {
+      els.pointCount.textContent = String(state.route.length);
+      els.routeLength.textContent = formatDistance(getRouteDistance());
+    }
+
+    function getRouteDistance() {
+      if (!state.map || state.route.length < 2) return 0;
+      let distance = 0;
+      for (let i = 1; i < state.route.length; i++) {
+        distance += state.map.getDistance(
+          new BMapGL.Point(state.route[i - 1].lng, state.route[i - 1].lat),
+          new BMapGL.Point(state.route[i].lng, state.route[i].lat)
+        );
+      }
+      if (els.closeLoopInput.checked && state.route.length > 2) {
+        distance += state.map.getDistance(
+          new BMapGL.Point(state.route[state.route.length - 1].lng, state.route[state.route.length - 1].lat),
+          new BMapGL.Point(state.route[0].lng, state.route[0].lat)
+        );
+      }
+      return distance;
+    }
+
+    function formatDistance(meters) {
+      if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+      return `${Math.round(meters)} m`;
+    }
+
+    function fitRoute() {
+      if (!requireMap()) return;
+      if (state.route.length === 0) {
+        state.map.centerAndZoom(new BMapGL.Point(YQ_CENTER.lng, YQ_CENTER.lat), 18);
+        return;
+      }
+      const viewport = state.map.getViewport(state.route.map(point => new BMapGL.Point(point.lng, point.lat)));
+      state.map.centerAndZoom(viewport.center, Math.min(viewport.zoom, 20));
+    }
+
+    function importFromText(showMessage = true) {
+      try {
+        const points = parseRouteText(els.routeText.value);
+        replaceRoute(points);
+        if (showMessage) setStatus(`已导入 ${points.length} 个点。`);
+      } catch (error) {
+        setStatus(error.message || "路线文本格式错误。", true);
+      }
+    }
+
+    function exportToText() {
+      els.routeText.value = routeToText(state.route);
+      setStatus(`已导出 ${state.route.length} 个点，格式兼容当前 route.txt。`);
+    }
+
+    function searchPlace() {
+      if (!requireMap()) return;
+      const keyword = els.searchInput.value.trim();
+      if (!keyword) return;
+      state.search.search(keyword);
+      setStatus("正在搜索...");
+    }
+
+    async function copyText() {
+      exportToText();
+      try {
+        await navigator.clipboard.writeText(els.routeText.value);
+        setStatus("路线文本已复制。");
+      } catch (error) {
+        els.routeText.select();
+        setStatus("浏览器阻止自动复制，已选中文本。", true);
+      }
+    }
+
+    function downloadText() {
+      exportToText();
+      const blob = new Blob([els.routeText.value], { type: "text/plain;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "route.txt";
+      link.click();
+      URL.revokeObjectURL(link.href);
+    }
+
+    els.loadMapBtn.addEventListener("click", loadBaiduMap);
+    els.searchBtn.addEventListener("click", searchPlace);
+    els.searchInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") searchPlace();
+    });
+    els.loadSampleBtn.addEventListener("click", () => {
+      els.routeText.value = SAMPLE_YQ_ROUTE;
+      importFromText();
+    });
+    els.fitBtn.addEventListener("click", fitRoute);
+    els.undoBtn.addEventListener("click", () => {
+      state.route.pop();
+      refreshMap();
+      setStatus("已撤销最后一个点。");
+    });
+    els.clearBtn.addEventListener("click", () => {
+      state.route = [];
+      refreshMap();
+      setStatus("已清空路线。");
+    });
+    els.closeLoopInput.addEventListener("change", refreshMap);
+    els.importBtn.addEventListener("click", () => importFromText());
+    els.exportBtn.addEventListener("click", exportToText);
+    els.copyBtn.addEventListener("click", copyText);
+    els.downloadBtn.addEventListener("click", downloadText);
+
+    refreshStats();
+    if (els.akInput.value) loadBaiduMap();
+  </script>
+</body>
+</html>
